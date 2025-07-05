@@ -1,0 +1,47 @@
+package org.actor;
+
+import org.nd4j.linalg.api.ndarray.INDArray;
+
+import akka.actor.typed.javadsl.AbstractBehavior;
+import akka.actor.typed.javadsl.ActorContext;
+import akka.actor.typed.ActorRef;
+
+import java.util.List;
+
+public abstract class LayerActor extends AbstractBehavior<LayerActor.Command> {
+    public interface Command {}
+
+    public static class Forward implements Command {
+        private final INDArray input_data;
+        private final List<INDArray> weights;
+        private final List<INDArray> biases;
+
+        public Forward(INDArray features, List<INDArray> weights, List<INDArray> biases) {
+            this.input_data = features;
+            this.weights = weights;
+            this.biases = biases;
+        }
+        public INDArray getInput() {
+            return input_data;
+        }
+        public List<INDArray> getWeights() {
+            return weights;
+        }
+
+        public List<INDArray> getBiases() {
+            return biases;
+        }
+    }
+    public static class Backward implements Command {
+        public INDArray gradient;
+
+        public Backward(INDArray gradient) {
+            this.gradient = gradient;
+        }
+    }
+    protected ActorRef<ParameterShardActor.Command> parameterShard;
+    protected LayerActor(ActorContext<Command> context, ActorRef<ParameterShardActor.Command> parameterShard) {
+        super(context);
+        this.parameterShard = parameterShard;
+    }
+}
