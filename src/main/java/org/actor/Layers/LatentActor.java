@@ -49,13 +49,12 @@ public class LatentActor extends LayerActor {
         INDArray std = Transforms.exp(zLogVar.mul(0.001));
         INDArray epsilon = Nd4j.randn(std.shape());
         INDArray zSampled = zMean.add(epsilon.mul(std));
-
         getContext().getLog().info("latent space {} ", zSampled);
-        decoder.tell(new DecoderLayerActor.Decode(zSampled, msg.getWeights(), msg.getBiases()));
+
+        decoder.tell(new DecoderLayerActor.Decode(zSampled, zMean, zLogVar, msg.getWeights(), msg.getBiases()));
 
         getContext().getLog().info("LatentActor processing latent variables.");
 
-        //calculate gradient
         return this;
     }
 }

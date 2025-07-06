@@ -7,53 +7,39 @@ import akka.actor.typed.javadsl.Receive;
 import akka.actor.typed.Behavior;
 import akka.actor.typed.ActorRef;
 
+import org.nd4j.linalg.api.ndarray.INDArray;
+import org.nd4j.linalg.factory.Nd4j;
+
+import java.io.*;
 import java.util.*;
 
 public class MasterActor {
 
-    public interface Command {
-    }
+    public interface Command { }
 
-    public static class Initialize implements Command {
-    }
+    public static class Initialize implements Command { }
 
     public static class Done implements Command {
     }
 
-    public static Behavior<Command> create(
-            Queue<DataPoint> data,
-            int numOfShards,
-            int inputDim,
-            int layerDim,
-            int latentDim,
-            double learningRate,
-            int epochs
-    ) {
+    public static Behavior<Command> create(Queue<DataPoint> data, int numOfShards, int inputDim, int layerDim, int latentDim, double learningRate, int epochs) {
         return Behaviors.setup(ctx ->
                 new MasterActorBehavior(ctx, data, numOfShards, inputDim, layerDim, latentDim, learningRate, epochs));
     }
 
     static class MasterActorBehavior extends AbstractBehavior<Command> {
+        private final List<ActorRef<ParameterShardActor.Command>> parameterShards;
+        private final List<ActorRef<DataShardActor.Command>> dataShards;
         private List<Queue<DataPoint>> Data;
-        private double learningRate;
-        private int numOfShards;
-        private int inputDim;
-        private int layerDim;
-        private int latentDim;
-        private int epochs;
-        private List<ActorRef<ParameterShardActor.Command>> parameterShards;
-        private List<ActorRef<DataShardActor.Command>> dataShards;
+        private final double learningRate;
+        private final int numOfShards;
+        private final int latentDim;
+        private final int inputDim;
+        private final int layerDim;
+        private final int epochs;
 
-        public MasterActorBehavior(
-                ActorContext<Command> context,
-                Queue<DataPoint> data,
-                int numOfShards,
-                int inputDim,
-                int layerDim,
-                int latentDim,
-                double learningRate,
-                int epochs
-        ) {
+
+        public MasterActorBehavior(ActorContext<Command> context, Queue<DataPoint> data, int numOfShards, int inputDim, int layerDim, int latentDim, double learningRate, int epochs) {
             super(context);
             this.numOfShards = numOfShards;
             this.inputDim = inputDim;
@@ -69,14 +55,15 @@ public class MasterActor {
             for (int i = 0; i < this.numOfShards; i++) {
 
                 ActorRef<ParameterShardActor.Command> parameterShard =
-                        getContext().spawn(ParameterShardActor.create(inputDim, layerDim, latentDim, learningRate, epochs), "parameterShard-" + i);
+                        getContext().spawn(ParameterShardActor.create(this.inputDim, this.layerDim, this.latentDim, this.learningRate, this.epochs), "parameterShard-" + i);
 
                 ActorRef<DataShardActor.Command> dataShard =
-                        getContext().spawn(DataShardActor.create(parameterShard, Data.get(i), 0.2), "dataShard-" + i);
+                        getContext().spawn(DataShardActor.create(parameterShard, Data.get(i), 0.2, 0.1f), "dataShard-" + i);
 
-                parameterShards.add(parameterShard);
-                dataShards.add(dataShard);
+                this.parameterShards.add(parameterShard);
+                this.dataShards.add(dataShard);
             }
+
             getContext().getLog().info("Master Actor {} Created.", getContext().getSelf().path());
         }
 
@@ -92,6 +79,7 @@ public class MasterActor {
                 this.parameterShards.get(i).tell(new ParameterShardActor.Initialize());
                 this.dataShards.get(i).tell(new DataShardActor.Initialize());
             }
+
             getContext().getLog().info("Master Actor {} initialized.", getContext().getSelf().path());
             return this;
         }

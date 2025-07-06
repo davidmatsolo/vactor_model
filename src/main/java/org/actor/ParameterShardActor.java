@@ -44,7 +44,6 @@ public class ParameterShardActor {
             this.replyTo = replyTo;
         }
     }
-    // === Response ===
     public static class ParameterResponse {
         public final List<INDArray> weights;
         public final List<INDArray> biases;
@@ -56,18 +55,12 @@ public class ParameterShardActor {
             this.epochs = epochs;
         }
     }
-    // === Factory Method ===
-    public static Behavior<Command> create(
-            int inputDim,
-            int layerDim,
-            int latentDim,
-            double learningRate,
-            int epochs) {
+
+    // === Factory Method === && === Behavior Implementation ===
+    public static Behavior<Command> create(int inputDim, int layerDim, int latentDim, double learningRate, int epochs) {
         return Behaviors.setup(ctx ->
                 new ParameterShardBehavior(ctx, inputDim, layerDim, latentDim, learningRate, epochs));
     }
-
-    // === Behavior Implementation ===
     static class ParameterShardBehavior extends AbstractBehavior<Command> {
         private final List<INDArray> weights;
         private final List<INDArray> biases;
@@ -76,14 +69,9 @@ public class ParameterShardActor {
         private final int latentDim;
         private final double learningRate;
         private final int epochs;
-        public ParameterShardBehavior(
-                ActorContext<Command> context,
-                int inputDim,
-                int layerDim,
-                int latentDim,
-                double learningRate,
-                int epochs
-        ) {
+
+        //
+        public ParameterShardBehavior(ActorContext<Command> context, int inputDim, int layerDim, int latentDim,double learningRate, int epochs) {
             super(context);
             this.inputDim = inputDim;
             this.layerDim = layerDim;
@@ -95,23 +83,23 @@ public class ParameterShardActor {
             this.biases = new ArrayList<>();
 
             // Add encoder weights
-            weights.add(Nd4j.zeros(layerDim, inputDim));     // Input → Hidden
-            weights.add(Nd4j.zeros(latentDim, layerDim));     // Hidden → Latent Mean
+            weights.add(Nd4j.zeros(this.layerDim, this.inputDim));     // Input → Hidden
+            weights.add(Nd4j.zeros(this.latentDim, this.layerDim));     // Hidden → Latent Mean
             // Add encoder biases
-            biases.add(Nd4j.zeros(layerDim));                // Hidden bias
-            biases.add(Nd4j.zeros(latentDim));               // Latent mean bias
+            biases.add(Nd4j.zeros(this.layerDim));                // Hidden bias
+            biases.add(Nd4j.zeros(this.latentDim));               // Latent mean bias
 
             //Add latent weights
-            weights.add(Nd4j.zeros(latentDim, layerDim));     // Hidden → Latent LogVar
+            weights.add(Nd4j.zeros(this.latentDim, this.layerDim));     // Hidden → Latent LogVar
             //Add latent biases
-            biases.add(Nd4j.zeros(latentDim));               // Latent logvar bias
+            biases.add(Nd4j.zeros(this.latentDim));               // Latent logvar bias
 
             // Add decoder weights
-            weights.add(Nd4j.zeros(layerDim, latentDim)); // Latent → Hidden
-            weights.add(Nd4j.zeros(inputDim, layerDim));  // Hidden → Reconstructed Input
+            weights.add(Nd4j.zeros(this.layerDim, this.latentDim)); // Latent → Hidden
+            weights.add(Nd4j.zeros(this.inputDim, this.layerDim));  // Hidden → Reconstructed Input
             // Add decoder biases
-            biases.add(Nd4j.zeros(layerDim));             // Decoder hidden bias
-            biases.add(Nd4j.zeros(inputDim));             // Reconstructed input bias
+            biases.add(Nd4j.zeros(this.layerDim));             // Decoder hidden bias
+            biases.add(Nd4j.zeros(this.inputDim));             // Reconstructed input bias
 
 
             context.getLog().info("ParameterShardActor {} Created.", context.getSelf().path().name());
@@ -124,6 +112,8 @@ public class ParameterShardActor {
                     .onMessage(FetchLatest.class, this::onFetchLatest)
                     .build();
         }
+
+        // === States ===
         private Behavior<Command> onInitialize(Initialize msg) {
             getContext().getLog().info("Initializing weights and biases...");
 

@@ -33,10 +33,13 @@ public abstract class LayerActor extends AbstractBehavior<LayerActor.Command> {
         }
     }
     public static class Backward implements Command {
-        public INDArray gradient;
+        private INDArray gradient;
 
-        public Backward(INDArray gradient) {
-            this.gradient = gradient;
+        public Backward(INDArray grad) {
+            this.gradient = grad;
+        }
+        public INDArray getGradient() {
+            return gradient;
         }
     }
     protected ActorRef<ParameterShardActor.Command> parameterShard;

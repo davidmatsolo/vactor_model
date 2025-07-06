@@ -4,7 +4,6 @@ import org.actor.Extras.ActivationFunctions;
 import org.actor.ParameterShardActor;
 import org.actor.DataShardActor;
 import org.actor.LayerActor;
-import org.actor.DataPoint;
 
 import akka.actor.typed.javadsl.ActorContext;
 import akka.actor.typed.javadsl.Behaviors;
@@ -14,7 +13,6 @@ import akka.actor.typed.ActorRef;
 
 import org.nd4j.linalg.api.ndarray.INDArray;
 
-import java.util.List;
 
 public class EncoderLayerActor extends LayerActor {
 
@@ -52,7 +50,7 @@ public class EncoderLayerActor extends LayerActor {
     private Behavior<Command> onForward(Forward msg) {
         INDArray input = msg.getInput();
         if (input.rank() == 1) {
-            input = input.reshape(1, input.size(0)); // Ensure it's 2D
+            input = input.reshape(1, input.size(0)); 
         }
 
         try {
