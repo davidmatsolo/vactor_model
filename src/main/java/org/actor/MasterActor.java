@@ -22,13 +22,13 @@ public class MasterActor {
     public static class Done implements Command {
     }
 
-    public static Behavior<Command> create(Queue<DataPoint> data, int numOfShards, int inputDim, int layerDim, int latentDim, double learningRate, int epochs) {
+    public static Behavior<Command> create(Queue<DataPoint> data, int numOfShards, int inputDim, int layerDim, int latentDim, double learningRate, int epochs, double beta) {
         return Behaviors.setup(ctx ->
-                new MasterActorBehavior(ctx, data, numOfShards, inputDim, layerDim, latentDim, learningRate, epochs));
+                new MasterActorBehavior(ctx, data, numOfShards, inputDim, layerDim, latentDim, learningRate, epochs, beta));
     }
 
     static class MasterActorBehavior extends AbstractBehavior<Command> {
-        private final List<ActorRef<ParameterShardActor.Command>> parameterShards;
+        private final ActorRef<ParameterShardActor.Command> parameterShard;
         private final List<ActorRef<DataShardActor.Command>> dataShards;
         private List<Queue<DataPoint>> Data;
         private final double learningRate;
@@ -37,9 +37,10 @@ public class MasterActor {
         private final int inputDim;
         private final int layerDim;
         private final int epochs;
+        private final double beta;
 
 
-        public MasterActorBehavior(ActorContext<Command> context, Queue<DataPoint> data, int numOfShards, int inputDim, int layerDim, int latentDim, double learningRate, int epochs) {
+        public MasterActorBehavior(ActorContext<Command> context, Queue<DataPoint> data, int numOfShards, int inputDim, int layerDim, int latentDim, double learningRate, int epochs, double beta) {
             super(context);
             this.numOfShards = numOfShards;
             this.inputDim = inputDim;
@@ -47,20 +48,18 @@ public class MasterActor {
             this.latentDim = latentDim;
             this.learningRate = learningRate;
             this.epochs = epochs;
+            this.beta = beta;
             this.Data = shardData(data);
 
-            this.parameterShards = new ArrayList<>();
             this.dataShards = new ArrayList<>();
 
+            this.parameterShard =
+                    getContext().spawn(ParameterShardActor.create(this.inputDim, this.layerDim, this.latentDim, this.learningRate, this.epochs), "parameterShard");
+
             for (int i = 0; i < this.numOfShards; i++) {
-
-                ActorRef<ParameterShardActor.Command> parameterShard =
-                        getContext().spawn(ParameterShardActor.create(this.inputDim, this.layerDim, this.latentDim, this.learningRate, this.epochs), "parameterShard-" + i);
-
                 ActorRef<DataShardActor.Command> dataShard =
-                        getContext().spawn(DataShardActor.create(parameterShard, Data.get(i), 0.2, 0.1f), "dataShard-" + i);
+                        getContext().spawn(DataShardActor.create(this.parameterShard, Data.get(i), 0.2, this.beta), "dataShard-" + i);
 
-                this.parameterShards.add(parameterShard);
                 this.dataShards.add(dataShard);
             }
 
@@ -75,8 +74,8 @@ public class MasterActor {
         }
 
         private Behavior<Command> onInitialize(Initialize msg) {
+            this.parameterShard.tell(new ParameterShardActor.Initialize());
             for (int i = 0; i < numOfShards; i++) {
-                this.parameterShards.get(i).tell(new ParameterShardActor.Initialize());
                 this.dataShards.get(i).tell(new DataShardActor.Initialize());
             }
 

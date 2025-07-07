@@ -79,7 +79,7 @@ public class DataShardActor {
 
 
     //
-    public static Behavior<Command> create(ActorRef<ParameterShardActor.Command> parameterShard, Queue<DataPoint> dataPoints, double testRatio, float beta) {
+    public static Behavior<Command> create(ActorRef<ParameterShardActor.Command> parameterShard, Queue<DataPoint> dataPoints, double testRatio, double beta) {
         return Behaviors.setup(ctx -> new DataShardBehavior(ctx, parameterShard, dataPoints, testRatio, beta));
     }
     static class DataShardBehavior extends AbstractBehavior<Command> {
@@ -90,7 +90,7 @@ public class DataShardActor {
         private Queue<DataPoint> validationData;
         private int remainingEpochs;
         private DataPoint currentDataPoint;
-        private final float beta;
+        private final double beta;
 
         //
         private void splitData(Queue<DataPoint> dataPoints, double validationRatio) {
@@ -114,17 +114,13 @@ public class DataShardActor {
             getContext().getLog().info("{} Training data size: {}", getContext().getSelf().path(), trainingData.size());
             getContext().getLog().info("{} Validation data size: {}", getContext().getSelf().path(), validationData.size());
         }
-
-
-        //
-        public DataShardBehavior(ActorContext<Command> context, ActorRef<ParameterShardActor.Command> parameterShard, Queue<DataPoint> dataPoints, double validationRatio, float beta) {
+        public DataShardBehavior(ActorContext<Command> context, ActorRef<ParameterShardActor.Command> parameterShard, Queue<DataPoint> dataPoints, double validationRatio, double beta) {
             super(context);
             this.parameterShard = parameterShard;
             this.splitData(dataPoints, validationRatio);
             this.beta = beta;
             getContext().getLog().info("DataShard {} Created.", getContext().getSelf().path());
         }
-
         @Override
         public Receive<Command> createReceive() {
             return newReceiveBuilder()
@@ -170,30 +166,39 @@ public class DataShardActor {
             return this;
         }
         private Behavior<Command> trainModel(InitialParametersReceived msg) {
-            currentDataPoint = trainingData.poll();
+            this.currentDataPoint = trainingData.poll();
             remainingEpochs=remainingEpochs+1;
 
             layers.get(layers.size() - 1).tell(
-                    new LayerActor.Forward(currentDataPoint.getFeatures(), msg.getWeights(), msg.getBiases()));
+                    new LayerActor.Forward(this.currentDataPoint.getFeatures(), msg.getWeights(), msg.getBiases()));
             return this;
         }
         private Behavior<Command> computeLossWithReply(ComputeLossWithReply msg) {
 
+
+            getContext().getLog().info("input data: {}", this.currentDataPoint.getFeatures());
+            getContext().getLog().info("reconstructed data: {}", msg.getReconstruction());
+            getContext().getLog().info("z mean data: {}", msg.getZMean());
+            getContext().getLog().info("z logVar data: {}", msg.getZLogVar());
+
+
+
             // === Compute MSE ===
             INDArray diff = msg.getReconstruction().sub(currentDataPoint.getFeatures());
-            float mse = diff.mul(diff).meanNumber().floatValue();
+            getContext().getLog().info("diff data: {}", diff);
+            double mse = diff.mul(diff).meanNumber().doubleValue();
 
             // === Compute KL Divergence ===
             INDArray mean = msg.getZMean();
             INDArray logVar = msg.getZLogVar();
             INDArray var = Transforms.exp(logVar);
             INDArray klLoss = var.add(mean.mul(mean)).sub(logVar).sub(1).mul(0.5);
-            float kl = klLoss.meanNumber().floatValue();
+            double kl = klLoss.meanNumber().doubleValue();
 
             // === Combine Loss ==
-            float total = mse + beta * kl;
+            double total = mse + beta * kl;
 
-            msg.getReplyTo().tell(new DecoderLayerActor.LossResponse(mse, kl, total));
+            msg.getReplyTo().tell(new DecoderLayerActor.LossResponse(mse, kl, total, layers, currentDataPoint));
 
             getContext().getLog().info("Reconstruction MSE: {}", mse);
             getContext().getLog().info("KL Divergence: {}", kl);

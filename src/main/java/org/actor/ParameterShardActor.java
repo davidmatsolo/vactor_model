@@ -128,6 +128,13 @@ public class ParameterShardActor {
             getContext().getLog().info("Initialized weights and biases.");
             return this;
         }
+        private Behavior<Command> onFetchLatest(FetchLatest msg) {
+            List<INDArray> weightsCopy = weights.stream().map(INDArray::dup).collect(Collectors.toList());
+            List<INDArray> biasesCopy = biases.stream().map(INDArray::dup).collect(Collectors.toList());
+            int epochsCopy = epochs;
+            msg.replyTo.tell(new ParameterResponse(weightsCopy, biasesCopy, epochsCopy));
+            return this;
+        }
         private Behavior<Command> onGradient(Gradient msg) {
             for (int i = 0; i < weights.size(); i++) {
                 weights.set(i, weights.get(i).sub(msg.getWeightGradients().get(i).mul(learningRate)));
@@ -140,12 +147,6 @@ public class ParameterShardActor {
             getContext().getLog().info("Updated weights and biases using gradients.");
             return this;
         }
-        private Behavior<Command> onFetchLatest(FetchLatest msg) {
-            List<INDArray> weightsCopy = weights.stream().map(INDArray::dup).collect(Collectors.toList());
-            List<INDArray> biasesCopy = biases.stream().map(INDArray::dup).collect(Collectors.toList());
-            int epochsCopy = epochs;
-            msg.replyTo.tell(new ParameterResponse(weightsCopy, biasesCopy, epochsCopy));
-            return this;
-        }
+
     }
 }

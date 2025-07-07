@@ -15,7 +15,7 @@ public class Root {
 
         List<double[]> raw = loadCSV("D:/MSc_RESEARCH/prototype/data/temp/data.csv");
         List<double[]> cleaned = cleanData(raw, true);
-        System.out.println("Cleaned data source size is "+ cleaned.size());
+        //System.out.println("Cleaned data source size is "+ cleaned.size());
         Queue<DataPoint> finalData = normalData(cleaned);
 
 
@@ -23,7 +23,7 @@ public class Root {
             //System.out.println("Cleaned data source size is "+ finalData.size());
             //saveNormalizedDataAsCSV(finalData, "D:/MSc_RESEARCH/prototype/data/temp/normalized_data.csv");
             ActorSystem<MasterActor.Command> system = ActorSystem.create(
-                    MasterActor.create(finalData, 1, 15, 32, 16, 0.01, 2), "VactorModel");
+                    MasterActor.create(finalData, 1, 15, 12, 4, 0.001, 200, 1.0), "VactorModel");
 
             system.tell(new MasterActor.Initialize());
         }else{
@@ -86,7 +86,7 @@ public class Root {
         Queue<DataPoint> dataPoints = new LinkedList<>();
 
         for (int i = 0; i < sampleCount; i++) {
-            INDArray features = normalized.getRow(i).dup(); // get feature vector for sample i
+            INDArray features = normalized.getRow(i).dup();
 
             // Assign label based on original temperature (not normalized)
             double tempCelsius = cleanedData.get(i)[4];
@@ -94,7 +94,6 @@ public class Root {
 
             dataPoints.add(new DataPoint(features, label));
         }
-        //System.out.println("data pints are size "+ dataPoints.size());
         return dataPoints;
     }
     //

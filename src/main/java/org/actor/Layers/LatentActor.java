@@ -17,6 +17,11 @@ import org.nd4j.linalg.factory.Nd4j;
 public class LatentActor extends LayerActor {
 
     private final ActorRef<Command> decoder;
+    private INDArray zMean;
+    private INDArray zLogVar;
+    private INDArray zSampled;
+    private INDArray epsilon;
+    private INDArray std;
 
     public static Behavior<Command> create(
             ActorRef<Command> decoder,
@@ -42,18 +47,33 @@ public class LatentActor extends LayerActor {
     }
     private Behavior<Command> onForward(EncoderLayerActor.Forward msg) {
         // Compute mean and log variance
-        INDArray zMean = ActivationFunctions.relu(msg.getInput().mmul(msg.getWeights().get(1).transpose()).addRowVector(msg.getBiases().get(1)));
-        INDArray zLogVar = ActivationFunctions.relu(msg.getInput().mmul(msg.getWeights().get(2).transpose()).addRowVector(msg.getBiases().get(2)));
+        zMean = ActivationFunctions.relu(msg.getInput().mmul(msg.getWeights().get(1).transpose()).addRowVector(msg.getBiases().get(1)));
+        zLogVar = ActivationFunctions.relu(msg.getInput().mmul(msg.getWeights().get(2).transpose()).addRowVector(msg.getBiases().get(2)));
 
-        // Sample
-        INDArray std = Transforms.exp(zLogVar.mul(0.001));
-        INDArray epsilon = Nd4j.randn(std.shape());
-        INDArray zSampled = zMean.add(epsilon.mul(std));
+        // reparamiterization trick
+        std = Transforms.exp(zLogVar.mul(0.5));
+        epsilon = Nd4j.randn(std.shape());
+        zSampled = zMean.add(epsilon.mul(std));
         getContext().getLog().info("latent space {} ", zSampled);
 
         decoder.tell(new DecoderLayerActor.Decode(zSampled, zMean, zLogVar, msg.getWeights(), msg.getBiases()));
 
-        getContext().getLog().info("LatentActor processing latent variables.");
+        return this;
+    }
+
+    private Behavior<Command> onBackward(DecoderLayerActor.Backward msg){
+        getContext().getLog().error("LatentActor received unexpected message: {}", msg);
+        INDArray dmu_kl = zMean.dup();
+        INDArray dz = msg.getGradients().get(0);
+
+        INDArray dlogvar_kl = Transforms.exp(zLogVar).sub(1).mul(0.5);
+
+        INDArray dsigma = dz.mul(epsilon);
+        INDArray dlogvar = dsigma.mul(std).mul(0.5);  // dsigma/dlogvar = 0.5 * exp(0.5 * logvar)
+        dlogvar.addi(dlogvar_kl);
+
+        INDArray dmu = dz.add(dmu_kl);  // Add KL gradient to dz/dmu
+
 
         return this;
     }
