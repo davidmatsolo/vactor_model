@@ -60,7 +60,6 @@ public class DataShardActor {
             this.zLogVar = zLogVar;
             this.replyTo = replyTo;
         }
-
         public INDArray getReconstruction() {
             return reconstruction;
         }
@@ -74,8 +73,6 @@ public class DataShardActor {
             return replyTo;
         }
     }
-
-
 
 
     //
@@ -131,8 +128,6 @@ public class DataShardActor {
                     .build();
         }
 
-
-
         // ===states===
         private Behavior<Command> onProcess(ReadyToProcess msg) {
             ActorRef<ParameterShardActor.ParameterResponse> adapter =
@@ -176,34 +171,21 @@ public class DataShardActor {
         private Behavior<Command> computeLossWithReply(ComputeLossWithReply msg) {
 
 
-            getContext().getLog().info("input data: {}", this.currentDataPoint.getFeatures());
-            getContext().getLog().info("reconstructed data: {}", msg.getReconstruction());
-            getContext().getLog().info("z mean data: {}", msg.getZMean());
-            getContext().getLog().info("z logVar data: {}", msg.getZLogVar());
-
-
-
             // === Compute MSE ===
             INDArray diff = msg.getReconstruction().sub(currentDataPoint.getFeatures());
-            getContext().getLog().info("diff data: {}", diff);
             double mse = diff.mul(diff).meanNumber().doubleValue();
 
             // === Compute KL Divergence ===
-            INDArray mean = msg.getZMean();
-            INDArray logVar = msg.getZLogVar();
-            INDArray var = Transforms.exp(logVar);
-            INDArray klLoss = var.add(mean.mul(mean)).sub(logVar).sub(1).mul(0.5);
+            INDArray var = Transforms.exp(msg.getZLogVar());
+            INDArray klLoss = var.add(msg.getZMean().mul(msg.getZMean())).sub(msg.getZLogVar()).sub(1).mul(0.5);
             double kl = klLoss.meanNumber().doubleValue();
 
             // === Combine Loss ==
             double total = mse + beta * kl;
 
-            msg.getReplyTo().tell(new DecoderLayerActor.LossResponse(mse, kl, total, layers, currentDataPoint));
+            msg.getReplyTo().tell(new DecoderLayerActor.LossResponse(mse, kl, total, layers));
 
-            getContext().getLog().info("Reconstruction MSE: {}", mse);
-            getContext().getLog().info("KL Divergence: {}", kl);
-            getContext().getLog().info("Total VAE Loss: {}", total);
-
+            getContext().getLog().info("Received Loss: total={}, mse={}, kl={}\n\n\n", total, mse, kl);
             return this;
         }
     }

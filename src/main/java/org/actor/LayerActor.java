@@ -6,6 +6,7 @@ import akka.actor.typed.javadsl.AbstractBehavior;
 import akka.actor.typed.javadsl.ActorContext;
 import akka.actor.typed.ActorRef;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public abstract class LayerActor extends AbstractBehavior<LayerActor.Command> {
@@ -33,24 +34,39 @@ public abstract class LayerActor extends AbstractBehavior<LayerActor.Command> {
         }
     }
     public static class Backward implements Command {
-        private List<INDArray> gradients;
-        private final List<ActorRef<LayerActor.Command>> layers;
-        private final ActorRef<LayerActor.Command> replyto;
+        private List<INDArray> weightGradients;
+        private List<INDArray> biasesGradients;
+        private INDArray dz;
 
-        public Backward(List<INDArray> grads, List<ActorRef<LayerActor.Command>> layers, ActorRef<LayerActor.Command> replyto) {
-            this.gradients = grads;
-            this.layers = layers;
-            this.replyto = replyto;
+        private final ActorRef<LayerActor.Command> sendto;
+
+        public Backward(INDArray weightGrads,INDArray biasesGrads,INDArray dz, ActorRef<LayerActor.Command> sendto) {
+            this.sendto = sendto;
+            this.dz = dz;
+            this.weightGradients = new ArrayList<>();
+            this.biasesGradients = new ArrayList<>();
+
+            addGradients(weightGrads, biasesGrads);
+
         }
-        public List<INDArray> getGradients() {
-            return gradients;
+
+        public INDArray getDz() {
+            return dz;
         }
-        public List<ActorRef<LayerActor.Command>> getLayers() {
-            return layers;
+        public List<INDArray> getBiasesGradients() {
+            return biasesGradients;
         }
-        public ActorRef<LayerActor.Command> getReplyto() {
-            return replyto;
+        public List<INDArray> getWeightGradients() {
+            return weightGradients;
         }
+        public ActorRef<LayerActor.Command> getSendTo() {
+            return sendto;
+        }
+        public void addGradients(INDArray weightGrads,INDArray biasesGrads){
+            this.weightGradients.add(0,weightGrads);
+            this.biasesGradients.add(0, biasesGrads);
+        }
+
     }
     protected ActorRef<ParameterShardActor.Command> parameterShard;
     protected LayerActor(ActorContext<Command> context, ActorRef<ParameterShardActor.Command> parameterShard) {

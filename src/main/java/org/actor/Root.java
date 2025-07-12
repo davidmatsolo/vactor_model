@@ -23,7 +23,7 @@ public class Root {
             //System.out.println("Cleaned data source size is "+ finalData.size());
             //saveNormalizedDataAsCSV(finalData, "D:/MSc_RESEARCH/prototype/data/temp/normalized_data.csv");
             ActorSystem<MasterActor.Command> system = ActorSystem.create(
-                    MasterActor.create(finalData, 1, 15, 12, 4, 0.001, 200, 1.0), "VactorModel");
+                    MasterActor.create(finalData, 1, 15, 12, 6, 0.001, 200, 1.0), "VactorModel");
 
             system.tell(new MasterActor.Initialize());
         }else{

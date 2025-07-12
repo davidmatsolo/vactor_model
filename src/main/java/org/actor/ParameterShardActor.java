@@ -83,20 +83,20 @@ public class ParameterShardActor {
             this.biases = new ArrayList<>();
 
             // Add encoder weights
-            weights.add(Nd4j.zeros(this.layerDim, this.inputDim));     // Input → Hidden
-            weights.add(Nd4j.zeros(this.latentDim, this.layerDim));     // Hidden → Latent Mean
+            weights.add(Nd4j.zeros(this.layerDim, this.inputDim));     // Input to Hidden
+            weights.add(Nd4j.zeros(this.latentDim, this.layerDim));     // Hidden to Latent Mean
             // Add encoder biases
             biases.add(Nd4j.zeros(this.layerDim));                // Hidden bias
             biases.add(Nd4j.zeros(this.latentDim));               // Latent mean bias
 
             //Add latent weights
-            weights.add(Nd4j.zeros(this.latentDim, this.layerDim));     // Hidden → Latent LogVar
+            weights.add(Nd4j.zeros(this.latentDim, this.layerDim));     // Hidden to Latent LogVar
             //Add latent biases
             biases.add(Nd4j.zeros(this.latentDim));               // Latent logvar bias
 
             // Add decoder weights
-            weights.add(Nd4j.zeros(this.layerDim, this.latentDim)); // Latent → Hidden
-            weights.add(Nd4j.zeros(this.inputDim, this.layerDim));  // Hidden → Reconstructed Input
+            weights.add(Nd4j.zeros(this.layerDim, this.latentDim)); // Latent to Hidden
+            weights.add(Nd4j.zeros(this.inputDim, this.layerDim));  // Hidden to Reconstructed Input
             // Add decoder biases
             biases.add(Nd4j.zeros(this.layerDim));             // Decoder hidden bias
             biases.add(Nd4j.zeros(this.inputDim));             // Reconstructed input bias
@@ -118,14 +118,17 @@ public class ParameterShardActor {
             getContext().getLog().info("Initializing weights and biases...");
 
             for (int i = 0; i < weights.size(); i++) {
-                weights.set(i, Nd4j.rand(weights.get(i).shape()).mul(2).sub(1)); // values in [-1, 1]
+                weights.set(i, Nd4j.rand(weights.get(i).shape()).mul(2).sub(3)); // values in [-1, 1]
+                getContext().getLog().info("Weight[{}] shape: {}", i, weights.get(i).shapeInfoToString());
             }
 
             for (int i = 0; i < biases.size(); i++) {
-                biases.set(i, Nd4j.rand(biases.get(i).shape()).mul(2).sub(1));
+                biases.set(i, Nd4j.rand(biases.get(i).shape()).mul(2).sub(3));
+                getContext().getLog().info("Bias[{}] shape: {}", i, biases.get(i).shapeInfoToString());
+
             }
 
-            getContext().getLog().info("Initialized weights and biases.");
+            getContext().getLog().info("Initialized weights and biases.\n\n\n");
             return this;
         }
         private Behavior<Command> onFetchLatest(FetchLatest msg) {
@@ -144,7 +147,7 @@ public class ParameterShardActor {
                 biases.set(i, biases.get(i).sub(msg.getBiasGradients().get(i).mul(learningRate)));
             }
 
-            getContext().getLog().info("Updated weights and biases using gradients.");
+            getContext().getLog().info("Updated weights shape {} and biases {}using gradients.");
             return this;
         }
 

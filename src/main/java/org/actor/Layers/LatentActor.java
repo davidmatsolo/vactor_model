@@ -14,6 +14,9 @@ import org.actor.LayerActor;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.factory.Nd4j;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class LatentActor extends LayerActor {
 
     private final ActorRef<Command> decoder;
@@ -43,39 +46,68 @@ public class LatentActor extends LayerActor {
     public Receive<Command> createReceive() {
         return newReceiveBuilder()
                 .onMessage(EncoderLayerActor.Forward.class, this::onForward)
+                .onMessage(Backward.class, this::onBackward)
                 .build();
     }
     private Behavior<Command> onForward(EncoderLayerActor.Forward msg) {
         // Compute mean and log variance
-        zMean = ActivationFunctions.relu(msg.getInput().mmul(msg.getWeights().get(1).transpose()).addRowVector(msg.getBiases().get(1)));
-        zLogVar = ActivationFunctions.relu(msg.getInput().mmul(msg.getWeights().get(2).transpose()).addRowVector(msg.getBiases().get(2)));
+        INDArray inputStored = msg.getInput();
+        //getContext().getLog().info("z input shape = {}", java.util.Arrays.toString(inputStored.shape()));
+        //getContext().getLog().info("z msg.getWeights().get(1) shape = {}", java.util.Arrays.toString(msg.getWeights().get(1).shape()));
 
-        // reparamiterization trick
+        zMean = msg.getWeights().get(1).mmul(inputStored).addColumnVector(msg.getBiases().get(1));
+        zLogVar = msg.getWeights().get(1).mmul(inputStored).addColumnVector(msg.getBiases().get(2));
+        /*
+        zMean = inputStored.mmul(msg.getWeights().get(1).transpose()).addRowVector(msg.getBiases().get(1));
+        zLogVar = inputStored.mmul(msg.getWeights().get(2).transpose()).addRowVector(msg.getBiases().get(2));*/
+        getContext().getLog().info("zMean shape = {}", java.util.Arrays.toString(zMean.shape()));
+        getContext().getLog().info("zLogVar shape = {}\n", java.util.Arrays.toString(zLogVar.shape()));
+
+        // ==reparamiterization trick==
         std = Transforms.exp(zLogVar.mul(0.5));
         epsilon = Nd4j.randn(std.shape());
         zSampled = zMean.add(epsilon.mul(std));
-        getContext().getLog().info("latent space {} ", zSampled);
 
         decoder.tell(new DecoderLayerActor.Decode(zSampled, zMean, zLogVar, msg.getWeights(), msg.getBiases()));
 
         return this;
     }
 
-    private Behavior<Command> onBackward(DecoderLayerActor.Backward msg){
-        getContext().getLog().error("LatentActor received unexpected message: {}", msg);
-        INDArray dmu_kl = zMean.dup();
-        INDArray dz = msg.getGradients().get(0);
+    private Behavior<Command> onBackward(Backward msg) {
 
-        INDArray dlogvar_kl = Transforms.exp(zLogVar).sub(1).mul(0.5);
+        INDArray dz = msg.getDz();  // Gradient from decoder wrt z
+        INDArray dmu_kl = zMean.dup();  // KL derivative wrt mean
+        INDArray dlogvar_kl = Transforms.exp(zLogVar).sub(1).mul(0.5);  // KL derivative wrt logvar
 
         INDArray dsigma = dz.mul(epsilon);
-        INDArray dlogvar = dsigma.mul(std).mul(0.5);  // dsigma/dlogvar = 0.5 * exp(0.5 * logvar)
-        dlogvar.addi(dlogvar_kl);
+        INDArray dlogvar = dsigma.mul(std).mul(0.5);  // chain rule: dz/dlogvar via std
+        dlogvar.addi(dlogvar_kl);  // add KL divergence gradient
 
-        INDArray dmu = dz.add(dmu_kl);  // Add KL gradient to dz/dmu
+        INDArray dmu = dz.add(dmu_kl);  // add KL divergence gradient to dz/dmu
 
+        // === Compute weight and bias gradients for encoder's mean path ===
+        INDArray input = zMean;  // input is the same as the input used to generate zMean/zLogVar originally
+        long batchSize = input.size(0);
+
+        INDArray dW_mu = input.transpose().mmul(dmu).div(batchSize);   // (input_dim, latent_dim)
+        INDArray db_mu = dmu.sum(0).div(batchSize);                    // (latent_dim)
+
+        INDArray dW_logvar = input.transpose().mmul(dlogvar).div(batchSize);  // (input_dim, latent_dim)
+        INDArray db_logvar = dlogvar.sum(0).div(batchSize);                   // (latent_dim)
+
+        msg.addGradients(dW_logvar, db_logvar);
+        msg.addGradients(dW_mu, db_mu);
+        getContext().getLog().info("\n\n\n\n\n\n");
+        getContext().getLog().info("dW_mu= {}", dW_mu);
+        getContext().getLog().info("db_mu= {}", db_mu);
+        getContext().getLog().info("dW_logvar= {}", dW_logvar);
+        getContext().getLog().info("db_logvar= {}", db_logvar);
+        getContext().getLog().info("\n\n\n\n\n\n");
+        // === Send Backward message to encoder ===
+        msg.getSendTo().tell(msg);  // assuming encoder is next in the list
 
         return this;
     }
+
 }
 
