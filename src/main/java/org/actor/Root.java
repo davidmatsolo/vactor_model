@@ -13,7 +13,7 @@ public class Root {
 
     public static void main(String[] args) throws IOException {
 
-        List<double[]> raw = loadCSV("D:/MSc_RESEARCH/prototype/data/temp/data.csv");
+        List<double[]> raw = loadCSV("D:/MSc_RESEARCH/prototype/data/temp/normalized_data.csv");
         List<double[]> cleaned = cleanData(raw, true);
         //System.out.println("Cleaned data source size is "+ cleaned.size());
         Queue<DataPoint> finalData = normalData(cleaned);
@@ -23,7 +23,7 @@ public class Root {
             //System.out.println("Cleaned data source size is "+ finalData.size());
             //saveNormalizedDataAsCSV(finalData, "D:/MSc_RESEARCH/prototype/data/temp/normalized_data.csv");
             ActorSystem<MasterActor.Command> system = ActorSystem.create(
-                    MasterActor.create(finalData, 1, 15, 12, 6, 0.001, 200, 1.0), "VactorModel");
+                    MasterActor.create(finalData, 1, 15, 12, 6, 0.000000000001, 200, 0.9), "VactorModel");
 
             system.tell(new MasterActor.Initialize());
         }else{
@@ -36,7 +36,7 @@ public class Root {
         List<double[]> rawData = new ArrayList<>();
 
         try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
-            String header = reader.readLine();  // Skip header
+            String header = reader.readLine();
             String line;
             while ((line = reader.readLine()) != null) {
                 String[] tokens = line.split(",");
@@ -56,9 +56,9 @@ public class Root {
 
         for (double[] row : rawData) {
             double[] newRow = row.clone();
-            if (convertFromKelvin) {
+            /*if (convertFromKelvin) {
                 newRow[4] = newRow[4] - 273.15;
-            }
+            }*/
             cleaned.add(newRow);
         }
 

@@ -30,7 +30,7 @@ public class MasterActor {
     static class MasterActorBehavior extends AbstractBehavior<Command> {
         private final ActorRef<ParameterShardActor.Command> parameterShard;
         private final List<ActorRef<DataShardActor.Command>> dataShards;
-        private List<Queue<DataPoint>> Data;
+        private List<List<DataPoint>> Data;
         private final double learningRate;
         private final int numOfShards;
         private final int latentDim;
@@ -38,6 +38,7 @@ public class MasterActor {
         private final int layerDim;
         private final int epochs;
         private final double beta;
+        private  int completedShards;
 
 
         public MasterActorBehavior(ActorContext<Command> context, Queue<DataPoint> data, int numOfShards, int inputDim, int layerDim, int latentDim, double learningRate, int epochs, double beta) {
@@ -50,7 +51,7 @@ public class MasterActor {
             this.epochs = epochs;
             this.beta = beta;
             this.Data = shardData(data);
-
+            this.completedShards =0;
             this.dataShards = new ArrayList<>();
 
             this.parameterShard =
@@ -72,7 +73,6 @@ public class MasterActor {
                     .onMessage(Initialize.class, this::onInitialize)
                     .build();
         }
-
         private Behavior<Command> onInitialize(Initialize msg) {
             this.parameterShard.tell(new ParameterShardActor.Initialize());
             for (int i = 0; i < numOfShards; i++) {
@@ -82,17 +82,16 @@ public class MasterActor {
             getContext().getLog().info("Master Actor {} initialized.", getContext().getSelf().path());
             return this;
         }
-
-        private List<Queue<DataPoint>> shardData(Queue<DataPoint> data) {
-            List<Queue<DataPoint>> shards = new ArrayList<>();
+        private List<List<DataPoint>> shardData(Queue<DataPoint> data) {
+            List<List<DataPoint>> shards = new ArrayList<>();
             for (int i = 0; i < numOfShards; i++) {
-                shards.add(new LinkedList<>());
+                shards.add(new ArrayList<>());
             }
 
             int originalSize = data.size();
             int index = 0;
-            while (!data.isEmpty()) {
-                shards.get(index % numOfShards).add(data.poll());
+            for (DataPoint point : data) {
+                shards.get(index % numOfShards).add(point);
                 index++;
             }
 

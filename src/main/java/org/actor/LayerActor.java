@@ -11,7 +11,6 @@ import java.util.List;
 
 public abstract class LayerActor extends AbstractBehavior<LayerActor.Command> {
     public interface Command {}
-
     public static class Forward implements Command {
         private final INDArray input_data;
         private final List<INDArray> weights;
@@ -34,24 +33,25 @@ public abstract class LayerActor extends AbstractBehavior<LayerActor.Command> {
         }
     }
     public static class Backward implements Command {
+        private INDArray delta;
         private List<INDArray> weightGradients;
         private List<INDArray> biasesGradients;
-        private INDArray dz;
-
         private final ActorRef<LayerActor.Command> sendto;
 
-        public Backward(INDArray weightGrads,INDArray biasesGrads,INDArray dz, ActorRef<LayerActor.Command> sendto) {
+        public Backward(INDArray weightGrads,INDArray biasesGrads,INDArray dL_dzSampled, ActorRef<LayerActor.Command> sendto) {
             this.sendto = sendto;
-            this.dz = dz;
+            this.delta = dL_dzSampled;
+
             this.weightGradients = new ArrayList<>();
             this.biasesGradients = new ArrayList<>();
-
             addGradients(weightGrads, biasesGrads);
 
         }
-
-        public INDArray getDz() {
-            return dz;
+        public INDArray getDelta() {
+            return delta;
+        }
+        public void setDelta(INDArray delta) {
+            this.delta = delta;
         }
         public List<INDArray> getBiasesGradients() {
             return biasesGradients;
@@ -66,7 +66,6 @@ public abstract class LayerActor extends AbstractBehavior<LayerActor.Command> {
             this.weightGradients.add(0,weightGrads);
             this.biasesGradients.add(0, biasesGrads);
         }
-
     }
     protected ActorRef<ParameterShardActor.Command> parameterShard;
     protected LayerActor(ActorContext<Command> context, ActorRef<ParameterShardActor.Command> parameterShard) {

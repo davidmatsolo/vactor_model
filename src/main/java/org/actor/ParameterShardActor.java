@@ -19,12 +19,22 @@ public class ParameterShardActor {
     public static class Gradient implements Command {
         private final List<INDArray> weightGradients;
         private final List<INDArray> biasGradients;
+        private final int remainingEpochs;
+        private ActorRef<DataShardActor.Command> replyTo;
 
-        public Gradient(List<INDArray> weightGradients, List<INDArray> biasGradients) {
+        public Gradient(List<INDArray> weightGradients, List<INDArray> biasGradients,int remainingEpochs, ActorRef<DataShardActor.Command> replyTo) {
             this.weightGradients = weightGradients;
             this.biasGradients = biasGradients;
+            this.remainingEpochs = remainingEpochs
+            this.replyTo = replyTo;
         }
 
+        public int getRemainingEpochs() {
+            return remainingEpochs;
+        }
+        public ActorRef<DataShardActor.Command> getReplyTo() {
+            return replyTo;
+        }
         public List<INDArray> getWeightGradients() {
             return weightGradients;
         }
@@ -112,9 +122,8 @@ public class ParameterShardActor {
                     .onMessage(FetchLatest.class, this::onFetchLatest)
                     .build();
         }
-
         // === States ===
-        private Behavior<Command> onInitialize(Initialize msg) {
+        /*private Behavior<Command> onInitialize(Initialize msg) {
             getContext().getLog().info("Initializing weights and biases...");
 
             for (int i = 0; i < weights.size(); i++) {
@@ -125,31 +134,60 @@ public class ParameterShardActor {
             for (int i = 0; i < biases.size(); i++) {
                 biases.set(i, Nd4j.rand(biases.get(i).shape()).mul(2).sub(3));
                 getContext().getLog().info("Bias[{}] shape: {}", i, biases.get(i).shapeInfoToString());
-
             }
 
             getContext().getLog().info("Initialized weights and biases.\n\n\n");
             return this;
+        }*/
+        private Behavior<Command> onInitialize(Initialize msg) {
+
+            for (int i = 0; i < weights.size(); i++) {
+                long[] shape = weights.get(i).shape();
+                double std = Math.sqrt(2.0 / (shape[0] + shape[1]));  // Xavier or He
+                weights.set(i, Nd4j.randn(shape).muli(std));  // Scaled random normal
+                getContext().getLog().info("Weight[{}] shape: {}, stddev: {}", i, weights.get(i).shapeInfoToString(), std);
+            }
+
+            for (int i = 0; i < biases.size(); i++) {
+                long[] shape = biases.get(i).shape();
+                biases.set(i, Nd4j.zeros(shape));  // Biases can start as zeros
+                getContext().getLog().info("Bias[{}] shape: {}", i, biases.get(i).shapeInfoToString());
+            }
+
+            getContext().getLog().info("All weights initialized with random values and biases to zero.\n\n\n");
+            return this;
         }
+
+
         private Behavior<Command> onFetchLatest(FetchLatest msg) {
             List<INDArray> weightsCopy = weights.stream().map(INDArray::dup).collect(Collectors.toList());
             List<INDArray> biasesCopy = biases.stream().map(INDArray::dup).collect(Collectors.toList());
             int epochsCopy = epochs;
+
             msg.replyTo.tell(new ParameterResponse(weightsCopy, biasesCopy, epochsCopy));
             return this;
         }
         private Behavior<Command> onGradient(Gradient msg) {
-            for (int i = 0; i < weights.size(); i++) {
-                weights.set(i, weights.get(i).sub(msg.getWeightGradients().get(i).mul(learningRate)));
-            }
 
-            for (int i = 0; i < biases.size(); i++) {
-                biases.set(i, biases.get(i).sub(msg.getBiasGradients().get(i).mul(learningRate)));
-            }
+            // Perform a gradient descent step: param := param - learningRate * gradient
+            applyGradientDescent(weights, msg.getWeightGradients(), learningRate);
+            applyGradientDescent(biases, msg.getBiasGradients(), learningRate);
 
-            getContext().getLog().info("Updated weights shape {} and biases {}using gradients.");
+            if(epochs >= msg.getRemainingEpochs()){
+
+            }
+            else {
+                msg.getReplyTo().tell(new DataShardActor.ParametersReceived(weights, biases, epochs));
+            }
             return this;
         }
 
+        // __define-ocg__: Applies gradient descent update to a parameter list
+        private void applyGradientDescent(List<INDArray> parameters, List<INDArray> gradients, double learningRate) {
+            for (int i = 0; i < parameters.size(); i++) {
+                INDArray varOcg = gradients.get(i).mul(learningRate);
+                parameters.set(i, parameters.get(i).sub(varOcg));
+            }
+        }
     }
 }
