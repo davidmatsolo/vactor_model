@@ -16,7 +16,7 @@ import org.actor.LayerActor;
 import java.util.List;
 
 public class DecoderLayerActor extends LayerActor {
-
+    //==commands state messages==
     public static class Decode implements Command {
         private final INDArray zSampled;
         private final INDArray zMean;
@@ -37,15 +37,15 @@ public class DecoderLayerActor extends LayerActor {
         public List<INDArray> getWeights() { return weights; }
         public List<INDArray> getBiases() { return biases; }
     }
-    // Local message to receive loss result
     public static class LossResponse implements Command {
-          final double mse;
-          final double kl;
-          final double total;
+
         private final ActorRef<LayerActor.Command> replyT;
         private final ActorRef<LayerActor.Command> sendTo;
         private final INDArray originalInput;
-
+        final double total;
+        final double mse;
+        final double kl;
+        //====
         public LossResponse(double mse, double kl, double total,INDArray originalInput, ActorRef<LayerActor.Command> replyTo, ActorRef<LayerActor.Command> sendTo) {
             this.mse = mse;
             this.kl = kl;
@@ -64,18 +64,17 @@ public class DecoderLayerActor extends LayerActor {
             return replyT;
         }
     }
-
+    //====
     private final ActorRef<DataShardActor.Command> parent;
     private INDArray decoHiddenLayer;
     private INDArray reconstruction;
     private INDArray zSampled;
-
-    //
+    //====
     private INDArray decoHidCurrentWeights;
     private INDArray decoHidCurrentBiases;
     private INDArray reConCurrentWeights;
     INDArray reConCurrentBiases;
-
+    //====
     public static Behavior<Command> create( ActorRef<ParameterShardActor.Command> parameterShard, ActorRef<DataShardActor.Command> parent) {
         return Behaviors.setup(ctx -> new DecoderLayerActor(ctx, parameterShard, parent));
     }
@@ -91,25 +90,21 @@ public class DecoderLayerActor extends LayerActor {
                 .onMessage(LossResponse.class, this::onLossResponse)
                 .build();
     }
+    //==states==
     private Behavior<Command> onDecode(Decode msg) {
+        zSampled = msg.getzSampled();
 
-        //getContext().getLog().info("decoHidCurrentWeights shape: {}", decoHidCurrentWeights.shapeInfoToString());
+        decoHidCurrentWeights = msg.getWeights().get(3);
+        decoHidCurrentBiases = msg.getBiases().get(3);
+
+        reConCurrentWeights = msg.getWeights().get(4);
+        reConCurrentBiases = msg.getBiases().get(4);
+
         try {
-            decoHidCurrentWeights = msg.getWeights().get(3);
-            decoHidCurrentBiases = msg.getBiases().get(3);
-
-            reConCurrentWeights = msg.getWeights().get(4);
-            reConCurrentBiases = msg.getBiases().get(4);
-
-            zSampled = msg.getzSampled();
             // Decoder hidden layer
             decoHiddenLayer = ActivationFunctions.relu(decoHidCurrentWeights.mmul(zSampled).addColumnVector(decoHidCurrentBiases));
             // Reconstruct input
             reconstruction = reConCurrentWeights.mmul(decoHiddenLayer).addColumnVector(reConCurrentBiases);
-            // Normalize reconstruction per column (sample)
-            //double eps = 1e-6;
-            //INDArray norms = reconstruction.norm2(0).add(eps); // shape [1, batch]
-            //reconstruction.diviRowVector(norms); // in-place normalization
 
             parent.tell(new DataShardActor.ComputeLossWithReply(reconstruction, msg.getZMean(), msg.getZLogVar(), getContext().getSelf()));
             return this;
@@ -121,30 +116,30 @@ public class DecoderLayerActor extends LayerActor {
     private Behavior<Command> onLossResponse(LossResponse msg) {
         try{
             INDArray OriginalInput = msg.getOriginalInput().reshape((int) msg.getOriginalInput().length(),1);
-
             INDArray deltaOut = reconstruction.sub(OriginalInput);
 
+            // === Step 3: d1 = ReLU'(z1) * (W2 * d0) ===
             INDArray dW_out = deltaOut.mmul(decoHiddenLayer.transpose());
-            INDArray db_out = deltaOut.sum(1); // Sum across batch
+            INDArray db_out = deltaOut.sum(1);
 
-            // === Step 3: d1 = ReLU'(z1) ⊙ (W2 · d0) ===
+            // === Step 3: d1 = ReLU'(z1) * (W2 * d0) ===
             INDArray z1 = decoHidCurrentWeights.mmul(zSampled).addColumnVector(decoHidCurrentBiases);
             INDArray reluPrime = z1.gt(0); // ReLU derivative (1 where z1 > 0, else 0)
             INDArray deltaHidden = reConCurrentWeights.transpose().mmul(deltaOut).mul(reluPrime);
 
             // === Step 4: Gradients for hidden layer weights and biases ===
             INDArray dW_dec = deltaHidden.mmul(zSampled.transpose());
-            INDArray db_dec = deltaHidden.sum(1); // Sum across batch
+            INDArray db_dec = deltaHidden.sum(1);
 
             INDArray dL_dzSampled = decoHidCurrentWeights.transpose().mmul(deltaHidden);
+
             double clipNorm = 1.0;
             double norm = dL_dzSampled.norm2Number().doubleValue();
-
             if (norm > clipNorm) {
                 double scale = clipNorm / (norm+0.001);
                 dL_dzSampled.muli(scale);
             }
-            getContext().getLog().info("Decoder Layer Grad norm = {}", dL_dzSampled.norm2Number());
+
             LayerActor.Backward backwardMsg = new LayerActor.Backward(dW_out, db_out, dL_dzSampled, msg.getSendTo());
             backwardMsg.addGradients(dW_dec, db_dec);
 

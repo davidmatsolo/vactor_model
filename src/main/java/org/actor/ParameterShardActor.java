@@ -25,7 +25,7 @@ public class ParameterShardActor {
         public Gradient(List<INDArray> weightGradients, List<INDArray> biasGradients,int remainingEpochs, ActorRef<DataShardActor.Command> replyTo) {
             this.weightGradients = weightGradients;
             this.biasGradients = biasGradients;
-            this.remainingEpochs = remainingEpochs
+            this.remainingEpochs = remainingEpochs;
             this.replyTo = replyTo;
         }
 
@@ -44,36 +44,26 @@ public class ParameterShardActor {
         }
     }
     public static class FetchLatest implements Command {
-        public final ActorRef<ParameterResponse> replyTo;
+        public final ActorRef<DataShardActor.Command> replyTo;
 
-        public ActorRef<ParameterResponse> getReplyTo() {
+        public ActorRef<DataShardActor.Command> getReplyTo() {
             return replyTo;
         }
 
-        public FetchLatest(ActorRef<ParameterResponse> replyTo) {
+        public FetchLatest(ActorRef<DataShardActor.Command> replyTo) {
             this.replyTo = replyTo;
-        }
-    }
-    public static class ParameterResponse {
-        public final List<INDArray> weights;
-        public final List<INDArray> biases;
-        public final int epochs;
-
-        public ParameterResponse(List<INDArray> weights, List<INDArray> biases, int epochs) {
-            this.weights = weights;
-            this.biases = biases;
-            this.epochs = epochs;
         }
     }
 
     // === Factory Method === && === Behavior Implementation ===
-    public static Behavior<Command> create(int inputDim, int layerDim, int latentDim, double learningRate, int epochs) {
+    public static Behavior<Command> create(ActorRef<MasterActor.Command> parent, int inputDim, int layerDim, int latentDim, double learningRate, int epochs) {
         return Behaviors.setup(ctx ->
-                new ParameterShardBehavior(ctx, inputDim, layerDim, latentDim, learningRate, epochs));
+                new ParameterShardBehavior(ctx, parent, inputDim, layerDim, latentDim, learningRate, epochs));
     }
     static class ParameterShardBehavior extends AbstractBehavior<Command> {
         private final List<INDArray> weights;
         private final List<INDArray> biases;
+        final ActorRef<MasterActor.Command> parent;
         private final int inputDim;
         private final int layerDim;
         private final int latentDim;
@@ -81,12 +71,13 @@ public class ParameterShardActor {
         private final int epochs;
 
         //
-        public ParameterShardBehavior(ActorContext<Command> context, int inputDim, int layerDim, int latentDim,double learningRate, int epochs) {
+        public ParameterShardBehavior(ActorContext<Command> context,ActorRef<MasterActor.Command> parent, int inputDim, int layerDim, int latentDim,double learningRate, int epochs) {
             super(context);
+            this.learningRate = learningRate;
+            this.latentDim = latentDim;
             this.inputDim = inputDim;
             this.layerDim = layerDim;
-            this.latentDim = latentDim;
-            this.learningRate = learningRate;
+            this.parent=parent;
             this.epochs = epochs;
 
             this.weights = new ArrayList<>();
@@ -111,7 +102,6 @@ public class ParameterShardActor {
             biases.add(Nd4j.zeros(this.layerDim));             // Decoder hidden bias
             biases.add(Nd4j.zeros(this.inputDim));             // Reconstructed input bias
 
-
             context.getLog().info("ParameterShardActor {} Created.", context.getSelf().path().name());
         }
         @Override
@@ -123,66 +113,50 @@ public class ParameterShardActor {
                     .build();
         }
         // === States ===
-        /*private Behavior<Command> onInitialize(Initialize msg) {
-            getContext().getLog().info("Initializing weights and biases...");
-
-            for (int i = 0; i < weights.size(); i++) {
-                weights.set(i, Nd4j.rand(weights.get(i).shape()).mul(2).sub(3)); // values in [-1, 1]
-                getContext().getLog().info("Weight[{}] shape: {}", i, weights.get(i).shapeInfoToString());
-            }
-
-            for (int i = 0; i < biases.size(); i++) {
-                biases.set(i, Nd4j.rand(biases.get(i).shape()).mul(2).sub(3));
-                getContext().getLog().info("Bias[{}] shape: {}", i, biases.get(i).shapeInfoToString());
-            }
-
-            getContext().getLog().info("Initialized weights and biases.\n\n\n");
-            return this;
-        }*/
         private Behavior<Command> onInitialize(Initialize msg) {
 
-            for (int i = 0; i < weights.size(); i++) {
-                long[] shape = weights.get(i).shape();
+            for (int i = 0; i < this.weights.size(); i++) {
+                long[] shape = this.weights.get(i).shape();
                 double std = Math.sqrt(2.0 / (shape[0] + shape[1]));  // Xavier or He
-                weights.set(i, Nd4j.randn(shape).muli(std));  // Scaled random normal
-                getContext().getLog().info("Weight[{}] shape: {}, stddev: {}", i, weights.get(i).shapeInfoToString(), std);
+                this.weights.set(i, Nd4j.randn(shape).muli(std));  // Scaled random normal
+                getContext().getLog().info("Weight[{}] shape: {}, stddev: {}", i, this.weights.get(i).shapeInfoToString(), std);
             }
 
-            for (int i = 0; i < biases.size(); i++) {
-                long[] shape = biases.get(i).shape();
-                biases.set(i, Nd4j.zeros(shape));  // Biases can start as zeros
-                getContext().getLog().info("Bias[{}] shape: {}", i, biases.get(i).shapeInfoToString());
+            for (int i = 0; i < this.biases.size(); i++) {
+                long[] shape = this.biases.get(i).shape();
+                this.biases.set(i, Nd4j.zeros(shape));  // Biases can start as zeros
+                getContext().getLog().info("Bias[{}] shape: {}", i, this.biases.get(i).shapeInfoToString());
             }
-
-            getContext().getLog().info("All weights initialized with random values and biases to zero.\n\n\n");
+            this.parent.tell(new MasterActor.Initialized());
+            getContext().getLog().info("All weights initialized with random values and biases to zero.\n");
             return this;
         }
-
-
         private Behavior<Command> onFetchLatest(FetchLatest msg) {
-            List<INDArray> weightsCopy = weights.stream().map(INDArray::dup).collect(Collectors.toList());
-            List<INDArray> biasesCopy = biases.stream().map(INDArray::dup).collect(Collectors.toList());
-            int epochsCopy = epochs;
+            List<INDArray> weightsCopy = this.weights.stream().map(INDArray::dup).collect(Collectors.toList());
+            List<INDArray> biasesCopy = this.biases.stream().map(INDArray::dup).collect(Collectors.toList());
+            int epochsCopy = this.epochs;
 
-            msg.replyTo.tell(new ParameterResponse(weightsCopy, biasesCopy, epochsCopy));
+            msg.replyTo.tell(new DataShardActor.ParametersReceived(weightsCopy, biasesCopy, epochsCopy));
             return this;
         }
         private Behavior<Command> onGradient(Gradient msg) {
+            //getContext().getLog().info("weights gradient before gradient apply= {}", msg.getWeightGradients().get(0));
+            //getContext().getLog().info("bias gradient before gradient apply= {}", msg.getBiasGradients());
 
             // Perform a gradient descent step: param := param - learningRate * gradient
-            applyGradientDescent(weights, msg.getWeightGradients(), learningRate);
-            applyGradientDescent(biases, msg.getBiasGradients(), learningRate);
+            applyGradientDescent(this.weights, msg.getWeightGradients(), this.learningRate);
+            applyGradientDescent(this.biases, msg.getBiasGradients(), this.learningRate);
+            //getContext().getLog().info("this.weights after gradient apply= {}", this.weights.get(0));
+            //getContext().getLog().info("this.bias after gradient apply= {}", this.biases);
 
             if(epochs >= msg.getRemainingEpochs()){
-
+                msg.getReplyTo().tell(new DataShardActor.ParametersReceived(weights, biases, epochs));
             }
             else {
-                msg.getReplyTo().tell(new DataShardActor.ParametersReceived(weights, biases, epochs));
+                msg.getReplyTo().tell(new DataShardActor.CompleteTraining());
             }
             return this;
         }
-
-        // __define-ocg__: Applies gradient descent update to a parameter list
         private void applyGradientDescent(List<INDArray> parameters, List<INDArray> gradients, double learningRate) {
             for (int i = 0; i < parameters.size(); i++) {
                 INDArray varOcg = gradients.get(i).mul(learningRate);

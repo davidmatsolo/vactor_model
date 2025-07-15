@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public abstract class LayerActor extends AbstractBehavior<LayerActor.Command> {
+    //==commands state messages==
     public interface Command {}
     public static class Forward implements Command {
         private final INDArray input_data;
@@ -67,7 +68,9 @@ public abstract class LayerActor extends AbstractBehavior<LayerActor.Command> {
             this.biasesGradients.add(0, biasesGrads);
         }
     }
+    //====
     protected ActorRef<ParameterShardActor.Command> parameterShard;
+    //====
     protected LayerActor(ActorContext<Command> context, ActorRef<ParameterShardActor.Command> parameterShard) {
         super(context);
         this.parameterShard = parameterShard;

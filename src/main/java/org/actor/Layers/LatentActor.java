@@ -16,33 +16,27 @@ import org.nd4j.linalg.factory.Nd4j;
 public class LatentActor extends LayerActor {
 
     private final ActorRef<Command> decoder;
-    private INDArray zMean;
-    private INDArray zLogVar;
-    private INDArray zSampled;
     private INDArray inputStored;
-    private INDArray std;
+    private INDArray zSampled;
     private INDArray epsilon;
+    private INDArray zLogVar;
+    private INDArray zMean;
+    private INDArray std;
     //
-    INDArray zMeanCurrentWeights;
-    INDArray zMeanCurrentBiases;
     INDArray zLogVarCurrentWeights;
     INDArray zLogVarCurrentBiases;
+    INDArray zMeanCurrentWeights;
+    INDArray zMeanCurrentBiases;
 
-
-    public static Behavior<Command> create(
-            ActorRef<Command> decoder,
-            ActorRef<ParameterShardActor.Command> parameterShard
-    ) {
+    public static Behavior<Command> create(ActorRef<Command> decoder, ActorRef<ParameterShardActor.Command> parameterShard) {
         return Behaviors.setup(ctx -> new LatentActor(ctx, parameterShard, decoder));
     }
-
     private LatentActor(ActorContext<Command> context, ActorRef<ParameterShardActor.Command> parameterShard, ActorRef<Command> decoder) {
         super(context, parameterShard);
         this.decoder = decoder;
 
         context.getLog().info("Latent Actor {} Created.", context.getSelf().path());
     }
-
     @Override
     public Receive<Command> createReceive() {
         return newReceiveBuilder()
@@ -51,6 +45,7 @@ public class LatentActor extends LayerActor {
                 .build();
     }
     private Behavior<Command> onForward(EncoderLayerActor.Forward msg) {
+        inputStored = msg.getInput();
 
         zMeanCurrentWeights = msg.getWeights().get(1);
         zMeanCurrentBiases = msg.getBiases().get(1);
@@ -61,7 +56,6 @@ public class LatentActor extends LayerActor {
         try {
 
             // Compute mean and log variance
-            inputStored = msg.getInput();
             zMean = zMeanCurrentWeights.mmul(inputStored).addColumnVector(zMeanCurrentBiases);
             zLogVar = zLogVarCurrentWeights.mmul(inputStored).addColumnVector(zLogVarCurrentBiases);
             // ==reparamiterization trick==
@@ -111,7 +105,7 @@ public class LatentActor extends LayerActor {
             msg.addGradients(dW_logvar, db_logvar);
             msg.setDelta(deltaToEncoder);
 
-            getContext().getLog().info("Latent layer Grad norm = {}\n\n" ,deltaToEncoder.norm2Number());
+            //getContext().getLog().info("Latent layer Grad norm = {}\n\n" ,deltaToEncoder.norm2Number());
 
             msg.getSendTo().tell(msg);
             return this;

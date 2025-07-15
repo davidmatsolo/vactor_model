@@ -14,16 +14,13 @@ public class Root {
     public static void main(String[] args) throws IOException {
 
         List<double[]> raw = loadCSV("D:/MSc_RESEARCH/prototype/data/temp/normalized_data.csv");
-        List<double[]> cleaned = cleanData(raw, true);
-        //System.out.println("Cleaned data source size is "+ cleaned.size());
-        Queue<DataPoint> finalData = normalData(cleaned);
-
+        Queue<DataPoint> finalData = normalData(raw);
 
         if (!finalData.isEmpty()) {
             //System.out.println("Cleaned data source size is "+ finalData.size());
             //saveNormalizedDataAsCSV(finalData, "D:/MSc_RESEARCH/prototype/data/temp/normalized_data.csv");
             ActorSystem<MasterActor.Command> system = ActorSystem.create(
-                    MasterActor.create(finalData, 1, 15, 12, 6, 0.000000000001, 200, 0.9), "VactorModel");
+                    MasterActor.create(finalData, 1, 15, 7, 4, 0.1, 2, 1), "VactorModel");
 
             system.tell(new MasterActor.Initialize());
         }else{
@@ -50,20 +47,7 @@ public class Root {
 
         return rawData;
     }
-    // Convert Kelvin to Celsius if needed
-    public static List<double[]> cleanData(List<double[]> rawData, boolean convertFromKelvin) {
-        List<double[]> cleaned = new ArrayList<>();
 
-        for (double[] row : rawData) {
-            double[] newRow = row.clone();
-            /*if (convertFromKelvin) {
-                newRow[4] = newRow[4] - 273.15;
-            }*/
-            cleaned.add(newRow);
-        }
-
-        return cleaned;
-    }
     // Normalize features and assign labels, return DataPoints with INDArray features
     public static Queue<DataPoint> normalizeAndLabel(List<double[]> cleanedData) {
         int featureCount = cleanedData.get(0).length;
@@ -108,8 +92,8 @@ public class Root {
 
             INDArray features = Nd4j.create(floatRow);  // FLOAT type
 
-            double tempCelsius = row[4];
-            int label = (tempCelsius <= 28.9) ? 1 : 0;
+            //double tempCelsius = row[4];
+            int label = 1;//(tempCelsius <= 28.9) ? 1 : 0;
 
             dataPoints.add(new DataPoint(features, label));
         }
