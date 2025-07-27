@@ -20,4 +20,9 @@ public class ActivationFunctions {
     public static INDArray softmax(INDArray input) {
         return Transforms.softmax(input.dup(), true); // safe non-inplace variant
     }
+
+    // __define-ocg__: LeakyReLU activation function
+    public static INDArray leakyRelu(INDArray input, double alpha) {
+        return Transforms.leakyRelu(input, alpha, true); // inplace = true
+    }
 }

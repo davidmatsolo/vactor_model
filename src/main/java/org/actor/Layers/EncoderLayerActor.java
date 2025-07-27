@@ -15,20 +15,14 @@ import org.nd4j.linalg.api.ndarray.INDArray;
 
 public class EncoderLayerActor extends LayerActor {
 
-
     final ActorRef<DataShardActor.Command> parent;
     private final ActorRef<Command> latent;
-    private INDArray activated;
-    INDArray currentWeights;
-    INDArray currentBiases;
     INDArray inputStored;
-    private INDArray z1;
+    private INDArray activated;
+    INDArray zLogVar;
+    INDArray zMean;
 
-    public static Behavior<Command> create(
-            ActorRef<Command> latent,
-            ActorRef<ParameterShardActor.Command> parameterShard,
-            ActorRef<DataShardActor.Command> parent
-    ) {
+    public static Behavior<Command> create(ActorRef<Command> latent, ActorRef<ParameterShardActor.Command> parameterShard, ActorRef<DataShardActor.Command> parent) {
         return Behaviors.setup(ctx -> new EncoderLayerActor(ctx, parameterShard, latent, parent));
     }
     private EncoderLayerActor(ActorContext<Command> context, ActorRef<ParameterShardActor.Command> parameterShard, ActorRef<Command> latent, ActorRef<DataShardActor.Command> parent) {
@@ -41,50 +35,56 @@ public class EncoderLayerActor extends LayerActor {
     @Override
     public Receive<Command> createReceive() {
         return newReceiveBuilder()
-                .onMessage(Forward.class, this::onForward)
+                .onMessage(ForwardPass.class, this::onEncode)
                 .onMessage(Backward.class, this::onBackward)
                 .build();
     }
     //==states==
-    private Behavior<Command> onForward(Forward msg) {
-        inputStored = msg.getInput();
-        if (inputStored == null || inputStored.isEmpty()) {
+    private Behavior<Command> onEncode(ForwardPass msg) {
+        if (msg.getInput() == null || msg.getInput().isEmpty()) {
             getContext().getLog().error("Received empty input in EncoderLayerActor.");
             return Behaviors.stopped();
         }
 
-        currentWeights= msg.getWeights().get(0);
-        currentBiases = msg.getBiases().get(0);
-
         try {
-            inputStored = inputStored.reshape(1, (int) inputStored.length());
+            inputStored = msg.getInput().reshape(1, (int) msg.getInput().length());
 
-            z1 = currentWeights.mmul(inputStored.transpose()).addColumnVector(currentBiases);
-            activated = ActivationFunctions.relu(z1);
+            activated = ActivationFunctions.leakyRelu(msg.getWeights().get(0).mmul(inputStored.transpose()).addColumnVector(msg.getBiases().get(0)), 0.1);
 
-            latent.tell(new Forward(activated, msg.getWeights(), msg.getBiases()));
+            // Compute mean and log variance
+            zMean = msg.getWeights().get(1).mmul(activated).addColumnVector(msg.getBiases().get(1));
+            zLogVar = msg.getWeights().get(2).mmul(activated).addColumnVector(msg.getBiases().get(2));
+
+            latent.tell(new LatentActor.Reparametize(zMean, zLogVar, msg.getWeights(), msg.getBiases()));
             return this;
         } catch (Exception e) {
-            getContext().getLog().error("Matrix operation failed: {}", e.getMessage());
+            getContext().getLog().error("EncoderLayerActor onEncode failed: {}", e.getMessage());
             return Behaviors.stopped();
         }
     }
     private Behavior<Command> onBackward(Backward msg) {
-        INDArray delta = msg.getDelta();
-        if (delta == null) {
+        if (!msg.hasDelta()) {
             getContext().getLog().error("Encoder onBackward: Received null delta.");
             return Behaviors.stopped();
         }
 
         try {
-            // ==ReLU Derivative==
-            INDArray reluPrime = activated.gt(0);
-            INDArray deltaActivated = delta.mul(reluPrime); // element-wise multiply
-            // ==Compute Gradients==
-            INDArray dW = deltaActivated.mmul(inputStored);
-            INDArray db = deltaActivated.sum(1);  // sum across batch dimension
-            //==Update Message==
-            msg.addGradients(dW, db);
+            INDArray dh_enc = msg.dequeueDelta();
+            INDArray d_zMean = msg.dequeueDelta();
+            INDArray d_zLogVar = msg.dequeueDelta();
+
+            //
+            INDArray dW_logvar = d_zLogVar.mmul(activated.transpose());
+            INDArray db_logvar = d_zLogVar.sum(1);
+            msg.addGradients(dW_logvar, db_logvar);
+
+            INDArray dW_mu = d_zMean.mmul(activated.transpose());
+            INDArray db_mu = d_zMean.sum(1);
+            msg.addGradients(dW_mu, db_mu);
+
+            INDArray dW_enc = dh_enc.mmul(inputStored);
+            INDArray db_enc = dh_enc.sum(1);
+            msg.addGradients(dW_enc, db_enc);
 
             parent.tell(new DataShardActor.DataPointProcessed(msg.getWeightGradients(), msg.getBiasesGradients()));
             return this;

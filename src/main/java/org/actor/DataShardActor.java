@@ -7,6 +7,7 @@ import akka.actor.typed.javadsl.Receive;
 import akka.actor.typed.Behavior;
 import akka.actor.typed.ActorRef;
 
+import org.actor.Extras.Operations;
 import org.actor.Layers.DecoderLayerActor;
 import org.actor.Layers.EncoderLayerActor;
 import org.actor.Layers.LatentActor;
@@ -14,6 +15,7 @@ import org.actor.Layers.LatentActor;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.ops.transforms.Transforms;
 
+import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.List;
@@ -46,16 +48,20 @@ public class DataShardActor {
         }
     }
     public static class ComputeLossWithReply implements Command {
-        private final INDArray reconstruction;
-        private final INDArray zMean;
-        private final INDArray zLogVar;
         private final ActorRef<DecoderLayerActor.Command> replyTo;
-
-        public ComputeLossWithReply(INDArray reconstruction, INDArray zMean, INDArray zLogVar, ActorRef<LayerActor.Command> replyTo) {
+        private final INDArray reconstruction;
+        private final List<INDArray> weights;
+        private final List<INDArray> biases;
+        private final INDArray zLogVar;
+        private final INDArray zMean;
+        //===
+        public ComputeLossWithReply(INDArray reconstruction, INDArray zMean, INDArray zLogVar, ActorRef<LayerActor.Command> replyTo, List<INDArray> weights, List<INDArray> biases) {
             this.reconstruction = reconstruction;
             this.zMean = zMean;
             this.zLogVar = zLogVar;
             this.replyTo = replyTo;
+            this.weights = weights;
+            this.biases = biases;
         }
         public INDArray getReconstruction() {
             return reconstruction;
@@ -69,6 +75,8 @@ public class DataShardActor {
         public ActorRef<LayerActor.Command> getReplyTo() {
             return replyTo;
         }
+        public List<INDArray> getWeights() { return weights; }
+        public List<INDArray> getBiases() { return biases; }
     }
     public static class ParametersReceived implements Command {
         private final List<INDArray> weights;
@@ -129,13 +137,16 @@ public class DataShardActor {
         private int remainingEpochs;
         private final double beta;
         int dataPointsProcessed;
+        List<Double> mseHistory;
         //====
         public DataShardBehavior(ActorContext<Command> context,ActorRef<MasterActor.Command> parent, ActorRef<ParameterShardActor.Command> parameterShard, List<DataPoint> dataPoints, double validationRatio, double beta) {
             super(context);
+
+            this.mseHistory = new ArrayList<>();
             this.splitData(dataPoints, validationRatio);
             this.parameterShard = parameterShard;
             this.dataPointsProcessed =0;
-            this.remainingEpochs =0;
+            this.remainingEpochs =1;
             this.parent = parent;
             this.beta = beta;
 
@@ -160,7 +171,7 @@ public class DataShardActor {
             remainingEpochs=remainingEpochs+1;
 
             //getContext().getLog().info("target = {}", currentDataPoint.getFeatures());
-            layers.get(layers.size() - 1).tell(new LayerActor.Forward(this.currentDataPoint.getFeatures(), msg.getWeights(), msg.getBiases()));
+            layers.get(layers.size() - 1).tell(new LayerActor.ForwardPass(this.currentDataPoint.getFeatures(), msg.getWeights(), msg.getBiases()));
             return this;
         }
         private void splitData(List<DataPoint> dataPoints, double validationRatio) {
@@ -203,11 +214,15 @@ public class DataShardActor {
 
                 // === Combine Loss ==
                 double total = mse + beta * kl;
-                getContext().getLog().info("output = {}", reconstruction);
-                getContext().getLog().info("target = {}",currentDataPoint.getFeatures());
+                //getContext().getLog().info("klLoss = {}", klLoss);
+                //getContext().getLog().info("output = {}", reconstruction);
+                //getContext().getLog().info("target = {}",currentDataPoint.getFeatures());
                 getContext().getLog().info("Received Loss: total={}, mse={}, kl={}", total, mse, kl);
 
-                msg.getReplyTo().tell(new DecoderLayerActor.LossResponse(mse, kl, total,currentDataPoint.getFeatures(), layers.get(1), layers.get(2)));
+                // === Send Loss Response ===
+                mseHistory.add(mse);
+                msg.getReplyTo().tell(new DecoderLayerActor.LossResponse(beta, diff, layers.get(1),layers.get(2),
+                        msg.getWeights(), msg.getBiases()));
                 return this;
             }catch (Exception ex){
                 getContext().getLog().error("Error in computeLossWithReply: {}", ex.getMessage());
@@ -215,7 +230,7 @@ public class DataShardActor {
             }
         }
         private Behavior<Command> onDataPointProcessed(DataPointProcessed msg) {
-            if (dataPointsProcessed >= trainingData.size()) {
+            if (dataPointsProcessed >= 32) { //trainingData.size()
                 dataPointsProcessed = 0;
                 remainingEpochs++;
             }
@@ -225,7 +240,7 @@ public class DataShardActor {
         private Behavior<Command> trainModel(ParametersReceived msg) {
             this.currentDataPoint = trainingData.get(dataPointsProcessed);
             dataPointsProcessed =dataPointsProcessed + 1;
-            layers.get(layers.size() - 1).tell(new LayerActor.Forward(this.currentDataPoint.getFeatures(), msg.getWeights(), msg.getBiases()));
+            layers.get(layers.size() - 1).tell(new LayerActor.ForwardPass(this.currentDataPoint.getFeatures(), msg.getWeights(), msg.getBiases()));
             return this;
         }
         private Behavior<Command> createLayers(CreateLayers msg) {
@@ -259,6 +274,8 @@ public class DataShardActor {
             return this;
         }
         private Behavior<Command> onDone(CompleteTraining msg){
+            String title = getContext().getSelf().path().name()+ " Loss History";
+            Operations.plot(title, this.mseHistory);
             parent.tell(new MasterActor.Done());
             return this;
         }
